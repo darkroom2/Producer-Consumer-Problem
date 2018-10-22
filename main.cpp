@@ -16,6 +16,19 @@
 
 #define MAX_SIZE 15
 
+class rngGen {
+private:
+    std::mt19937_64 gen;
+public:
+    rngGen() : gen(std::random_device()()) {}
+
+    int rand_int(int min, int max) {
+        std::uniform_int_distribution<int> dist(min, max);
+        return dist(gen);
+    }
+
+};
+
 union semun {
     int val;                /* value for SETVAL */
     struct semid_ds *buf;   /* buffer for IPC_STAT & IPC_SET */
@@ -47,22 +60,21 @@ void increment(unsigned short num) {
     semop(semid, &sb, 1);
 }
 
-static int rand_int(int min, int max) {    //C++11 way of generating "trully" random values
-    std::random_device rd;
-    std::mt19937 mt(rd());
-    std::uniform_int_distribution<int> dist(min, max);
-    return dist(mt);
-}
-
 int main() {
     int i = 0;
     int n = 0;
     pid_t pid;
 
-    semid = semget(IPC_PRIVATE, 5, 0666 | IPC_CREAT); // 5elementowa tablica semaforow, z read-write permission dla wszystkich (no execute) rw-rw-rw-
-    shared_mem_id = shmget(IPC_PRIVATE, sizeof(Buffer), 0777 | IPC_CREAT); // read-write permission dla wszystkich (with execute) rwxrwxrwx
+    rngGen rng;
 
-    auto *buff = (Buffer *) shmat(shared_mem_id, nullptr, 0); // dolacza segment pamieci dzielonej o id shared_mem_id do przestrzeni adresowej procesu (i pozniej jego dzieci)
+    // 5elementowa tablica semaforow, z read-write permission dla wszystkich (no execute) rw-rw-rw-
+    semid = semget(IPC_PRIVATE, 5, 0666 | IPC_CREAT);
+
+    // read-write permission dla wszystkich (with execute) rwxrwxrwx
+    shared_mem_id = shmget(IPC_PRIVATE, sizeof(Buffer), 0777 | IPC_CREAT);
+
+    // dolacza segment pamieci dzielonej o id shared_mem_id do przestrzeni adresowej procesu (i pozniej jego dzieci)
+    auto *buff = (Buffer *) shmat(shared_mem_id, nullptr, 0);
 
     tmp.val = MAX_SIZE;
     semctl(semid, EMPTY, SETVAL, tmp); // 'empty' semaphore
@@ -87,14 +99,16 @@ int main() {
     else if (pid == 0) {    // proces produceta (child)
         std::cout << "child PID: " << getpid() << std::endl;
         while (true) {
-            usleep(static_cast<__useconds_t>(rand_int(200, 300))); // jakotakie zroznicowanie czasowe "checi" dostepu do bufora
-            n = rand_int(1, 4); // randomowa ilosc elementow do dodania do bufora
+            // jakotakie zroznicowanie czasowe "checi" dostepu do bufora
+            usleep(static_cast<__useconds_t>(rng.rand_int(200, 300)));
+            n = rng.rand_int(1, 4); // randomowa ilosc elementow do dodania do bufora
 
             decrement(SET); // tylko 1 pisarz
             std::cout << "   prod: " << getpid() << " dodaje (" << n << ")" << std::endl;
 
             for (i = 0; i < n; i++) {   // dodajemy elementy
-                decrement(EMPTY);   // zmniejszenie o 1 semafora o rozmiarze bufora (jesli 0 (czyli pelny bufor) to sie zawiesza i koljeny prod nie moze wejsc w sekcje (mutex SET))
+                decrement(EMPTY);   // zmniejszenie o 1 semafora o rozmiarze bufora (jesli 0 (czyli pelny bufor)
+                // to sie zawiesza i koljeny prod nie moze wejsc w sekcje (mutex SET))
                 decrement(MUTEX);   // mutex zapewniajacy atomowe dodanie
 
                 buff->arr[buff->head] = getpid();
@@ -114,22 +128,22 @@ int main() {
             std::cout << std::endl;
             increment(SET);
 
-            if (rand_int(1, 90) == 27)
+            if (rng.rand_int(1, 90) == 27)
                 break;
         }
         return 0;
     } else if (pid > 0) {   // proces konsumenta (parent)
         std::cout << "parent PID: " << getpid() << std::endl;
         while (true) {
-            usleep(static_cast<__useconds_t>(rand_int(200, 300)));
+            usleep(static_cast<__useconds_t>(rng.rand_int(200, 300)));
 
-            n = rand_int(1, 4);
+            n = rng.rand_int(1, 4);
 
             decrement(GET);
             std::cout << "   kons: " << getpid() << " czyta (" << n << ")" << std::endl;
             for (i = 0; i < n; ++i) {
-                decrement(FULL); // jak 0 to pusty i nie moze czytac , a po inkrementacji w producencie, bedzie mogl juz czytac
-                decrement(MUTEX);
+                decrement(FULL); // jak 0 to pusty i nie moze czytac ,
+                decrement(MUTEX); // a po inkrementacji w producencie, bedzie mogl juz czytac
 
                 //auto val = buff->arr[buff->tail];
                 buff->elementCount--;
@@ -150,7 +164,7 @@ int main() {
             std::cout << std::endl;
             increment(GET);
 
-            if (rand_int(1, 100) == 27)
+            if (rng.rand_int(1, 100) == 27)
                 break;
         }
         return 0;
